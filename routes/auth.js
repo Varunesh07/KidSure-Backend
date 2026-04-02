@@ -100,7 +100,7 @@ router.post('/login', async (req, res) => {
 // to check if the stored token is still valid
 router.get('/me', protect, async (req, res) => {
   try {
-    const freshUser = await User.findById(user._id).select('-password')
+    const freshUser = await User.findById(req.user._id).select('-password')
 
     return res.status(200).json({
       _id: freshUser._id,
