@@ -87,6 +87,7 @@ router.post('/login', async (req, res) => {
       email: freshUser.email,
       role: freshUser.role,
       managedHospital: freshUser.managedHospital,
+      savedHospitals: freshUser.savedHospitals || [],
       token: generateToken(freshUser._id),
     })
   } catch (err) {
@@ -108,6 +109,7 @@ router.get('/me', protect, async (req, res) => {
       email: freshUser.email,
       role: freshUser.role,
       managedHospital: freshUser.managedHospital,
+      savedHospitals: freshUser.savedHospitals || [],
       token: generateToken(freshUser._id),
     })
   } catch (err) {
