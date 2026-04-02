@@ -121,6 +121,100 @@ router.post('/match', protect, async (req, res) => {
   }
 })
 
+// POST /api/symptoms/analyze
+// takes natural language text, sends to Groq to extract categories, and finds matching hospitals
+router.post('/analyze', protect, async (req, res) => {
+  try {
+    const { text, lng, lat, radius = 10000 } = req.body
+
+    if (!text || text.trim() === '') {
+      return res.status(400).json({ message: 'Description text is required' })
+    }
+    if (!lng || !lat) {
+      return res.status(400).json({ message: 'Location is required' })
+    }
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({ message: 'Groq API Key is not configured on the server' })
+    }
+
+    const systemPrompt = `You are an AI pediatric triage router for the KidSure app.
+Read the parent's input carefully. Map their input to AT LEAST ONE and AT MOST THREE of the following exact categories: 
+["Paediatric", "General", "Emergency", "Surgery", "ENT", "Dermatology", "Orthopaedic", "Neurology"].
+Return ONLY a valid JSON array of strings containing your selected categories.
+Never return markdown, conversational text, or medical advice.`
+
+    // Perform native Node.js fetch to Groq LPU
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile", // Exceptionally fast, low latency
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
+        ],
+        temperature: 0.1, // Ensure deterministic precise categories
+      })
+    })
+
+    if (!response.ok) {
+        const errText = await response.text();
+        console.error('Groq API Error Details:', errText);
+        throw new Error(`Failed to communicate with Groq LPU API: ${errText}`);
+    }
+
+    const data = await response.json()
+    const contentStr = data.choices[0].message.content.trim()
+    
+    let matchedSpecialisations = []
+    try {
+        // Strip out any potential markdown blocks if Llama disobeys
+        const jsonStr = contentStr.replace(/```json/g, '').replace(/```/g, '')
+        matchedSpecialisations = JSON.parse(jsonStr)
+    } catch(err) {
+        throw new Error('Groq failed to return a valid JSON array string')
+    }
+    
+    if (!Array.isArray(matchedSpecialisations) || matchedSpecialisations.length === 0) {
+        return res.status(404).json({ message: 'AI could not map your issue to a specific category.' })
+    }
+
+    // Now query MongoDB for hospitals that match those exact strictly spelled categories
+    const hospitals = await Hospital.find({
+      status: 'approved',
+      categories: { $in: matchedSpecialisations },
+      location: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+          $maxDistance: parseFloat(radius),
+        },
+      },
+    }).limit(10)
+
+    if (hospitals.length === 0) {
+      return res.status(404).json({ message: 'No hospitals found nearby for these parsed symptoms' })
+    }
+
+    // Set an artificial high match score to perfectly sync with the frontend rendering algorithm
+    const scored = hospitals.map((hospital) => ({
+      ...hospital.toObject(),
+      matchScore: 10
+    }))
+
+    return res.status(200).json({
+      matchedSpecialisations,
+      hospitals: scored,
+    })
+
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: 'Server error parsing AI symptoms' })
+  }
+})
+
 // POST /api/symptoms/seed
 // superadmin only — populates the symptoms collection
 // you call this once after deployment, never again
