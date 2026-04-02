@@ -86,15 +86,20 @@ router.get('/search', protect, async (req, res) => {
 // hospital detail page
 router.get('/:id', protect, async (req, res) => {
   try {
-    const hospital = await Hospital.findOne({
-      _id: req.params.id,
-      status: 'approved',
-    }).populate('submittedBy', 'name email')
-    // populate brings in the submitter's name and email
-    // instead of just showing the ObjectId
+    const hospital = await Hospital.findById(req.params.id).populate('submittedBy', 'name email')
 
     if (!hospital) {
       return res.status(404).json({ message: 'Hospital not found' })
+    }
+
+    // Only allow viewing unapproved hospitals if the user is the owner or a superadmin
+    if (hospital.status !== 'approved') {
+      const isOwner = hospital.submittedBy._id.toString() === req.user._id.toString();
+      const isSuperAdmin = req.user.role === 'superadmin';
+      
+      if (!isOwner && !isSuperAdmin) {
+        return res.status(404).json({ message: 'Hospital not found' });
+      }
     }
 
     return res.status(200).json(hospital)

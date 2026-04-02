@@ -1,6 +1,6 @@
+import 'dotenv/config'
 import express from 'express'
 import mongoose from 'mongoose'
-import dotenv from 'dotenv'
 import cors from 'cors'
 
 // routes (we'll create these next)
@@ -10,8 +10,6 @@ import symptomRoutes from './routes/symptoms.js'
 import ratingRoutes from './routes/ratings.js'
 import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/user.js'
-
-dotenv.config()
 
 const app = express()
 
