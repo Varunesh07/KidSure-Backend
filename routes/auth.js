@@ -1,7 +1,10 @@
 import express from 'express'
 import jwt from 'jsonwebtoken'
+import { OAuth2Client } from 'google-auth-library'
 import User from '../models/User.js'
 import { protect } from '../middleware/authMiddleware.js'
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
 const router = express.Router()
 
@@ -115,6 +118,56 @@ router.get('/me', protect, async (req, res) => {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// POST /api/auth/google
+// Verifies the Google ID token from the frontend popup
+// Finds or creates the user and returns the same JWT format as login
+router.post('/google', async (req, res) => {
+  try {
+    const { credential } = req.body
+
+    if (!credential) {
+      return res.status(400).json({ message: 'Google credential token is required' })
+    }
+
+    // Verify the token Google sent is legitimate and decrypt the user's info
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    })
+    const payload = ticket.getPayload()
+    const { email, name, picture } = payload
+
+    // Check if a user with this Google email already exists
+    let user = await User.findOne({ email })
+
+    if (!user) {
+      // First time — auto-register as parent (no password needed for Google accounts)
+      user = await User.create({
+        name,
+        email,
+        password: `google_oauth_${Date.now()}`, // placeholder — will be hashed but never used
+        role: 'user',
+        phone: '',
+      })
+    }
+
+    // Return identical JWT format as normal login
+    const freshUser = await User.findById(user._id).select('-password')
+    return res.status(200).json({
+      _id: freshUser._id,
+      name: freshUser.name,
+      email: freshUser.email,
+      role: freshUser.role,
+      managedHospital: freshUser.managedHospital,
+      savedHospitals: freshUser.savedHospitals || [],
+      token: generateToken(freshUser._id),
+    })
+  } catch (err) {
+    console.error('Google Auth Error:', err)
+    return res.status(401).json({ message: 'Invalid Google token. Please try again.' })
   }
 })
 
