@@ -126,29 +126,32 @@ router.get('/me', protect, async (req, res) => {
 // Finds or creates the user and returns the same JWT format as login
 router.post('/google', async (req, res) => {
   try {
-    const { credential } = req.body
+    const { access_token } = req.body
 
-    if (!credential) {
-      return res.status(400).json({ message: 'Google credential token is required' })
+    if (!access_token) {
+      return res.status(400).json({ message: 'Google access token is required' })
     }
 
-    // Verify the token Google sent is legitimate and decrypt the user's info
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID,
+    // Fetch the user's profile from Google using the access token
+    const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${access_token}` }
     })
-    const payload = ticket.getPayload()
-    const { email, name, picture } = payload
+
+    if (!googleRes.ok) {
+      return res.status(401).json({ message: 'Invalid Google token. Please try again.' })
+    }
+
+    const { email, name, picture } = await googleRes.json()
 
     // Check if a user with this Google email already exists
     let user = await User.findOne({ email })
 
     if (!user) {
-      // First time — auto-register as parent (no password needed for Google accounts)
+      // First time — auto-register as a regular user (no password needed for Google accounts)
       user = await User.create({
         name,
         email,
-        password: `google_oauth_${Date.now()}`, // placeholder — will be hashed but never used
+        password: `google_oauth_${Date.now()}`, // placeholder — hashed but never used
         role: 'user',
         phone: '',
       })
@@ -167,7 +170,7 @@ router.post('/google', async (req, res) => {
     })
   } catch (err) {
     console.error('Google Auth Error:', err)
-    return res.status(401).json({ message: 'Invalid Google token. Please try again.' })
+    return res.status(401).json({ message: 'Google sign-in failed. Please try again.' })
   }
 })
 
