@@ -4,14 +4,16 @@ A location-aware paediatric hospital finder. Parents travelling to an unfamiliar
 
 Built with the MERN stack. This repository contains the Express + MongoDB backend only.
 
-> Frontend repository — coming soon.
+
 
 ---
 
 ## Features
 
 - JWT-based authentication with role system (`user`, `hospital_admin`, `superadmin`)
+- Google OAuth 2.0 integration for seamless one-tap login and registration
 - Geospatial hospital search using MongoDB `$near` and `2dsphere` index
+- AI-Powered Symptom Checking — uses Groq LPU (Llama 3) to parse natural language descriptions into specialisation categories
 - Symptom-to-specialisation matching algorithm — returns top 5 hospitals scored by relevance + proximity
 - Hospital submission and approval workflow — hospital admins submit, superadmin approves
 - Star ratings with automatic average recalculation
@@ -92,6 +94,8 @@ CLIENT_URL=http://localhost:5173
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GROQ_API_KEY=your_groq_api_key
 ```
 
 > Get `MONGO_URI` from Atlas → Clusters → Connect → Drivers.  
@@ -162,6 +166,8 @@ You only need one superadmin account. All admin routes are protected and only ac
 | `CLOUDINARY_CLOUD_NAME` | From Cloudinary dashboard |
 | `CLOUDINARY_API_KEY` | From Cloudinary dashboard |
 | `CLOUDINARY_API_SECRET` | From Cloudinary dashboard — never expose this |
+| `GOOGLE_CLIENT_ID` | From Google Cloud Console (OAuth 2.0 Client IDs), used for Google Sign-In backend verification |
+| `GROQ_API_KEY` | Your Groq API key used for the AI symptom analyzer |
 
 ---
 
@@ -175,6 +181,7 @@ Full API documentation with request/response examples is in [`API_DOCUMENTATION.
 |--------|-------|-------------|------|
 | POST | `/api/auth/register` | Create account | Public |
 | POST | `/api/auth/login` | Login, get token | Public |
+| POST | `/api/auth/google` | Google OAuth one-tap Sign-In/Register | Public |
 | GET | `/api/auth/me` | Get current user | User |
 | GET | `/api/hospitals/nearby` | Hospitals near location | User |
 | GET | `/api/hospitals/search` | Filter by category + distance | User |
@@ -182,6 +189,7 @@ Full API documentation with request/response examples is in [`API_DOCUMENTATION.
 | POST | `/api/hospitals/submit` | Submit new hospital | Hospital admin |
 | PUT | `/api/hospitals/:id/edit` | Edit own listing | Hospital admin |
 | POST | `/api/symptoms/match` | Top 5 hospitals for symptoms | User |
+| POST | `/api/symptoms/analyze` | AI analysis of natural language symptoms using Groq | User |
 | GET | `/api/symptoms` | All symptoms grouped | User |
 | POST | `/api/ratings/:hospitalId` | Submit star rating | User |
 | GET | `/api/ratings/:hospitalId/mine` | Check own rating | User |
