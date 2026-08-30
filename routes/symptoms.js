@@ -151,7 +151,7 @@ Never return markdown, conversational text, or medical advice.`
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", // Exceptionally fast, low latency
+        model: "openai/gpt-oss-20b", // Exceptionally fast, low latency
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: text }
