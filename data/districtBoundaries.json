@@ -1,0 +1,90 @@
+[
+  {
+    "name": "Coimbatore Corporation",
+    "district": "Coimbatore",
+    "boundaryType": "City Corporation",
+    "boundary": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [76.88, 11.15],
+          [77.10, 11.15],
+          [77.37, 11.12],
+          [77.37, 10.96],
+          [77.18, 10.94],
+          [76.95, 10.94],
+          [76.88, 11.00],
+          [76.88, 11.15]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "Greater Chennai Corporation",
+    "district": "Chennai",
+    "boundaryType": "City Corporation",
+    "boundary": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [80.20, 13.15],
+          [80.33, 13.15],
+          [80.33, 13.02],
+          [80.20, 13.02],
+          [80.20, 13.15]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "Madurai Corporation",
+    "district": "Madurai",
+    "boundaryType": "City Corporation",
+    "boundary": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [78.06, 9.98],
+          [78.18, 9.98],
+          [78.18, 9.88],
+          [78.06, 9.88],
+          [78.06, 9.98]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "Tiruchirappalli Corporation",
+    "district": "Trichy",
+    "boundaryType": "City Corporation",
+    "boundary": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [78.64, 10.85],
+          [78.76, 10.85],
+          [78.76, 10.74],
+          [78.64, 10.74],
+          [78.64, 10.85]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "Salem Corporation",
+    "district": "Salem",
+    "boundaryType": "City Corporation",
+    "boundary": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [78.09, 11.72],
+          [78.20, 11.72],
+          [78.20, 11.61],
+          [78.09, 11.61],
+          [78.09, 11.72]
+        ]
+      ]
+    }
+  }
+]

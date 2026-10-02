@@ -10,6 +10,7 @@ import symptomRoutes from './routes/symptoms.js'
 import ratingRoutes from './routes/ratings.js'
 import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/user.js'
+import spatialRoutes from './routes/spatial.js'
 
 const app = express()
 
@@ -28,6 +29,7 @@ app.use('/api/symptoms', symptomRoutes)
 app.use('/api/ratings', ratingRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/user', userRoutes)
+app.use('/api/spatial', spatialRoutes)
 
 // health check — Render and UptimeRobot ping this to keep the server awake
 app.get('/', (req, res) => {
