@@ -115,7 +115,7 @@ router.get('/boundary-count', protect, async (req, res) => {
 // Feature 3: Geodetic distance calculation using $geoNear aggregation pipeline
 router.get('/distances', protect, async (req, res) => {
   try {
-    const { lng, lat, limit = 15 } = req.query
+    const { lng, lat, limit = 50 } = req.query
 
     if (!lng || !lat) {
       return res.status(400).json({ message: 'lng and lat coordinates are required' })
