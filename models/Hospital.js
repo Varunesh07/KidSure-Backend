@@ -40,6 +40,12 @@ const hospitalSchema = new mongoose.Schema(
       trim: true,
     },
 
+    district: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
     phone: {
       type: String,
       required: true,
@@ -129,6 +135,7 @@ const hospitalSchema = new mongoose.Schema(
 
 // this one line creates the 2dsphere index on Atlas automatically
 hospitalSchema.index({ location: '2dsphere' })
+hospitalSchema.index({ district: 1 })
 
 const Hospital = mongoose.model('Hospital', hospitalSchema)
 

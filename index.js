@@ -10,13 +10,15 @@ import symptomRoutes from './routes/symptoms.js'
 import ratingRoutes from './routes/ratings.js'
 import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/user.js'
+import spatialRoutes from './routes/spatial.js'
 
 const app = express()
 
 // middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173', // Vite runs on 5173 by default
+    origin: true, // allow any local network device (phone, tablet) to connect
+    credentials: true,
   }),
 )
 app.use(express.json()) // lets Express read req.body as JSON
@@ -28,6 +30,7 @@ app.use('/api/symptoms', symptomRoutes)
 app.use('/api/ratings', ratingRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/user', userRoutes)
+app.use('/api/spatial', spatialRoutes)
 
 // health check — Render and UptimeRobot ping this to keep the server awake
 app.get('/', (req, res) => {

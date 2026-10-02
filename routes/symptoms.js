@@ -72,25 +72,40 @@ router.post('/match', protect, async (req, res) => {
       .map(([spec]) => spec)
 
     // step 4 — geo query hospitals that have those specialisations nearby
-    const hospitals = await Hospital.find({
-      status: 'approved',
-      categories: { $in: topSpecialisations },
-      location: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+    const runGeoQuery = async (maxDist) => {
+      return await Hospital.find({
+        status: 'approved',
+        categories: { $in: topSpecialisations },
+        location: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            $maxDistance: maxDist,
           },
-          $maxDistance: parseFloat(radius),
         },
-      },
-    }).limit(20)
-    // fetch 20 then we score and slice to top 5 below
+      }).limit(20)
+    }
+
+    const initDist = parseFloat(radius)
+    let hospitals = await runGeoQuery(initDist)
+    let autoExpanded = false
+    let radiusUsedKm = Math.round(initDist / 1000)
+
+    // Fallback auto-expansion to 50km if 0 hospitals found
+    if (hospitals.length === 0 && initDist < 50000) {
+      hospitals = await runGeoQuery(50000)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = 50
+      }
+    }
 
     if (hospitals.length === 0) {
       return res
         .status(404)
-        .json({ message: 'No hospitals found nearby for these symptoms' })
+        .json({ message: 'No hospitals found within 50 km for these symptoms' })
     }
 
     // step 5 — score each hospital based on how many matching
@@ -114,6 +129,8 @@ router.post('/match', protect, async (req, res) => {
     return res.status(200).json({
       matchedSpecialisations: topSpecialisations,
       hospitals: top5,
+      autoExpanded,
+      radiusUsedKm,
     })
   } catch (err) {
     console.error(err)
@@ -133,69 +150,117 @@ router.post('/analyze', protect, async (req, res) => {
     if (!lng || !lat) {
       return res.status(400).json({ message: 'Location is required' })
     }
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ message: 'Groq API Key is not configured on the server' })
-    }
+    let matchedSpecialisations = []
 
-    const systemPrompt = `You are an AI pediatric triage router for the KidSure app.
+    // 1. Try Groq LPU if configured
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const systemPrompt = `You are an AI pediatric triage router for the KidSure app.
 Read the parent's input carefully. Map their input to AT LEAST ONE and AT MOST THREE of the following exact categories: 
 ["Paediatric", "General", "Emergency", "Surgery", "ENT", "Dermatology", "Orthopaedic", "Neurology"].
 Return ONLY a valid JSON array of strings containing your selected categories.
 Never return markdown, conversational text, or medical advice.`
 
-    // Perform native Node.js fetch to Groq LPU
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-20b", // Exceptionally fast, low latency
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: text }
-        ],
-        temperature: 0.1, // Ensure deterministic precise categories
-      })
-    })
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(3000), // Fast 3-second timeout to avoid network stalls
+          body: JSON.stringify({
+            model: 'openai/gpt-oss-20b',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: text },
+            ],
+            temperature: 0.1,
+          }),
+        })
 
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error('Groq API Error Details:', errText);
-        throw new Error(`Failed to communicate with Groq LPU API: ${errText}`);
+        if (response.ok) {
+          const data = await response.json()
+          const contentStr = data.choices?.[0]?.message?.content?.trim() || ''
+          const match = contentStr.match(/\[[\s\S]*?\]/)
+          if (match) {
+            matchedSpecialisations = JSON.parse(match[0])
+          }
+        } else {
+          console.warn('Groq API returned error status, using built-in clinical NLP fallback')
+        }
+      } catch (groqErr) {
+        console.warn('Groq API call failed, using built-in clinical NLP fallback:', groqErr.message)
+      }
     }
 
-    const data = await response.json()
-    const contentStr = data.choices[0].message.content.trim()
-    
-    let matchedSpecialisations = []
-    try {
-        // Strip out any potential markdown blocks if Llama disobeys
-        const jsonStr = contentStr.replace(/```json/g, '').replace(/```/g, '')
-        matchedSpecialisations = JSON.parse(jsonStr)
-    } catch(err) {
-        throw new Error('Groq failed to return a valid JSON array string')
-    }
-    
+    // 2. Resilient Medical NLP Keyword Fallback (runs if Groq fails or returns empty)
     if (!Array.isArray(matchedSpecialisations) || matchedSpecialisations.length === 0) {
-        return res.status(404).json({ message: 'AI could not map your issue to a specific category.' })
+      const lower = text.toLowerCase()
+      const matched = new Set()
+
+      if (/fever|temperature|shiver|cold|flu|cough|runny|vomit|diarrhea|infant|baby|child|pediatric|paediatric/.test(lower)) {
+        matched.add('Paediatric')
+        matched.add('General')
+      }
+      if (/emergency|severe|unconscious|bleed|breath|burn|seizure|chok|accident|critical|danger|poison/.test(lower)) {
+        matched.add('Emergency')
+        matched.add('Paediatric')
+      }
+      if (/bone|fracture|joint|limb|fall|sprain|twist|arm|leg|ankle|knee/.test(lower)) {
+        matched.add('Orthopaedic')
+      }
+      if (/ear|nose|throat|tonsil|hearing|eye|redness|discharge|cough/.test(lower)) {
+        matched.add('ENT')
+      }
+      if (/skin|rash|itch|spots|allergy|blister|eczema|bite|hive/.test(lower)) {
+        matched.add('Dermatology')
+      }
+      if (/headache|dizzy|seizure|faint|vision|numb|brain|neurology/.test(lower)) {
+        matched.add('Neurology')
+      }
+      if (/surgery|wound|cut|appendix|stomach|abdomen|belly|swallow/.test(lower)) {
+        matched.add('Surgery')
+        matched.add('Paediatric')
+      }
+
+      if (matched.size === 0) {
+        matched.add('Paediatric')
+        matched.add('General')
+      }
+
+      matchedSpecialisations = Array.from(matched).slice(0, 3)
     }
 
     // Now query MongoDB for hospitals that match those exact strictly spelled categories
-    const hospitals = await Hospital.find({
-      status: 'approved',
-      categories: { $in: matchedSpecialisations },
-      location: {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: parseFloat(radius),
+    const runAiGeoQuery = async (maxDist) => {
+      return await Hospital.find({
+        status: 'approved',
+        categories: { $in: matchedSpecialisations },
+        location: {
+          $near: {
+            $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+            $maxDistance: maxDist,
+          },
         },
-      },
-    }).limit(10)
+      }).limit(15)
+    }
+
+    const initAiDist = parseFloat(radius)
+    let hospitals = await runAiGeoQuery(initAiDist)
+    let autoExpanded = false
+    let radiusUsedKm = Math.round(initAiDist / 1000)
+
+    // Fallback auto-expansion to 50km if 0 hospitals found
+    if (hospitals.length === 0 && initAiDist < 50000) {
+      hospitals = await runAiGeoQuery(50000)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = 50
+      }
+    }
 
     if (hospitals.length === 0) {
-      return res.status(404).json({ message: 'No hospitals found nearby for these parsed symptoms' })
+      return res.status(404).json({ message: 'No hospitals found within 50 km for these parsed symptoms' })
     }
 
     // Set an artificial high match score to perfectly sync with the frontend rendering algorithm
@@ -207,6 +272,8 @@ Never return markdown, conversational text, or medical advice.`
     return res.status(200).json({
       matchedSpecialisations,
       hospitals: scored,
+      autoExpanded,
+      radiusUsedKm,
     })
 
   } catch (err) {

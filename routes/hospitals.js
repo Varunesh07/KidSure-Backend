@@ -13,27 +13,58 @@ const router = express.Router()
 
 // GET /api/hospitals/nearby
 // called on home page load — fetches hospitals near the user's location
+// Automatically expands search from initial radius (e.g. 10km) to 50km if 0 hospitals found
 router.get('/nearby', protect, async (req, res) => {
   try {
-    const { lng, lat, radius = 5000 } = req.query
-    // radius in metres — default 5km
+    const { lng, lat, radius = 10000, extended } = req.query
 
     if (!lng || !lat) {
       return res.status(400).json({ message: 'lng and lat are required' })
     }
 
-    const hospitals = await Hospital.find({
-      status: 'approved',
-      location: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+    const parsedLng = parseFloat(lng)
+    const parsedLat = parseFloat(lat)
+    const initialDist = parseFloat(radius)
+
+    const findHospitals = async (maxDist) => {
+      return await Hospital.find({
+        status: 'approved',
+        location: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [parsedLng, parsedLat],
+            },
+            $maxDistance: maxDist,
           },
-          $maxDistance: parseFloat(radius),
         },
-      },
-    }).limit(10)
+      }).limit(20)
+    }
+
+    let hospitals = await findHospitals(initialDist)
+    let autoExpanded = false
+    let radiusUsedKm = Math.round(initialDist / 1000)
+
+    // Fallback: If 0 hospitals found within initial radius, auto-expand to 50km
+    if (hospitals.length === 0 && initialDist < 50000) {
+      hospitals = await findHospitals(50000)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = 50
+      }
+    }
+
+    res.set('x-auto-expanded', autoExpanded ? 'true' : 'false')
+    res.set('x-radius-used-km', radiusUsedKm.toString())
+
+    if (extended === 'true') {
+      return res.status(200).json({
+        hospitals,
+        autoExpanded,
+        radiusUsedKm,
+        count: hospitals.length,
+      })
+    }
 
     return res.status(200).json(hospitals)
   } catch (err) {
