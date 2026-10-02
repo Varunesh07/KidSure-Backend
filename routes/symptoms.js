@@ -72,25 +72,40 @@ router.post('/match', protect, async (req, res) => {
       .map(([spec]) => spec)
 
     // step 4 — geo query hospitals that have those specialisations nearby
-    const hospitals = await Hospital.find({
-      status: 'approved',
-      categories: { $in: topSpecialisations },
-      location: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+    const runGeoQuery = async (maxDist) => {
+      return await Hospital.find({
+        status: 'approved',
+        categories: { $in: topSpecialisations },
+        location: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            $maxDistance: maxDist,
           },
-          $maxDistance: parseFloat(radius),
         },
-      },
-    }).limit(20)
-    // fetch 20 then we score and slice to top 5 below
+      }).limit(20)
+    }
+
+    const initDist = parseFloat(radius)
+    let hospitals = await runGeoQuery(initDist)
+    let autoExpanded = false
+    let radiusUsedKm = Math.round(initDist / 1000)
+
+    // Fallback auto-expansion to 50km if 0 hospitals found
+    if (hospitals.length === 0 && initDist < 50000) {
+      hospitals = await runGeoQuery(50000)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = 50
+      }
+    }
 
     if (hospitals.length === 0) {
       return res
         .status(404)
-        .json({ message: 'No hospitals found nearby for these symptoms' })
+        .json({ message: 'No hospitals found within 50 km for these symptoms' })
     }
 
     // step 5 — score each hospital based on how many matching
@@ -114,6 +129,8 @@ router.post('/match', protect, async (req, res) => {
     return res.status(200).json({
       matchedSpecialisations: topSpecialisations,
       hospitals: top5,
+      autoExpanded,
+      radiusUsedKm,
     })
   } catch (err) {
     console.error(err)
@@ -183,19 +200,35 @@ Never return markdown, conversational text, or medical advice.`
     }
 
     // Now query MongoDB for hospitals that match those exact strictly spelled categories
-    const hospitals = await Hospital.find({
-      status: 'approved',
-      categories: { $in: matchedSpecialisations },
-      location: {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: parseFloat(radius),
+    const runAiGeoQuery = async (maxDist) => {
+      return await Hospital.find({
+        status: 'approved',
+        categories: { $in: matchedSpecialisations },
+        location: {
+          $near: {
+            $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+            $maxDistance: maxDist,
+          },
         },
-      },
-    }).limit(10)
+      }).limit(15)
+    }
+
+    const initAiDist = parseFloat(radius)
+    let hospitals = await runAiGeoQuery(initAiDist)
+    let autoExpanded = false
+    let radiusUsedKm = Math.round(initAiDist / 1000)
+
+    // Fallback auto-expansion to 50km if 0 hospitals found
+    if (hospitals.length === 0 && initAiDist < 50000) {
+      hospitals = await runAiGeoQuery(50000)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = 50
+      }
+    }
 
     if (hospitals.length === 0) {
-      return res.status(404).json({ message: 'No hospitals found nearby for these parsed symptoms' })
+      return res.status(404).json({ message: 'No hospitals found within 50 km for these parsed symptoms' })
     }
 
     // Set an artificial high match score to perfectly sync with the frontend rendering algorithm
@@ -207,6 +240,8 @@ Never return markdown, conversational text, or medical advice.`
     return res.status(200).json({
       matchedSpecialisations,
       hospitals: scored,
+      autoExpanded,
+      radiusUsedKm,
     })
 
   } catch (err) {
