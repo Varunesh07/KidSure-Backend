@@ -167,8 +167,9 @@ Never return markdown, conversational text, or medical advice.`
             'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
             'Content-Type': 'application/json',
           },
+          signal: AbortSignal.timeout(3000), // Fast 3-second timeout to avoid network stalls
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'openai/gpt-oss-20b',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: text },
