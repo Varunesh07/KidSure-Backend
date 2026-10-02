@@ -15,7 +15,7 @@ const seedBoundaries = async () => {
     await mongoose.connect(process.env.MONGO_URI)
     console.log('Connected to MongoDB Atlas for Boundary Seeding')
 
-    const dataPath = path.join(__dirname, 'data', 'districtBoundaries.json')
+    const dataPath = path.join(__dirname, 'data', 'all_district_boundaries.json')
     const rawData = fs.readFileSync(dataPath, 'utf-8')
     const boundaries = JSON.parse(rawData)
 
@@ -23,7 +23,7 @@ const seedBoundaries = async () => {
       await Boundary.findOneAndUpdate(
         { name: b.name },
         { ...b },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       )
     }
 

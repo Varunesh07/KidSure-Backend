@@ -228,7 +228,7 @@ router.get('/radius-comparison', protect, async (req, res) => {
 
 // 6. POST /api/spatial/crud-demo
 // Feature 1: Spatial CRUD demonstration endpoint for examiner
-router.post('/crud-demo', protect, superAdminOnly, async (req, res) => {
+router.post('/crud-demo', protect, async (req, res) => {
   try {
     const demoName = 'Spatial Lab Demo Hospital - ' + Date.now()
 
