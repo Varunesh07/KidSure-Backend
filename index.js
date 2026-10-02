@@ -17,7 +17,8 @@ const app = express()
 // middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173', // Vite runs on 5173 by default
+    origin: true, // allow any local network device (phone, tablet) to connect
+    credentials: true,
   }),
 )
 app.use(express.json()) // lets Express read req.body as JSON
