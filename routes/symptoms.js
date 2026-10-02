@@ -168,12 +168,12 @@ Never return markdown, conversational text, or medical advice.`
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-20b", // Exceptionally fast, low latency
+        model: "llama-3.3-70b-versatile",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: text }
         ],
-        temperature: 0.1, // Ensure deterministic precise categories
+        temperature: 0.1,
       })
     })
 
@@ -184,15 +184,18 @@ Never return markdown, conversational text, or medical advice.`
     }
 
     const data = await response.json()
-    const contentStr = data.choices[0].message.content.trim()
+    const contentStr = data.choices?.[0]?.message?.content?.trim() || ''
     
     let matchedSpecialisations = []
     try {
-        // Strip out any potential markdown blocks if Llama disobeys
-        const jsonStr = contentStr.replace(/```json/g, '').replace(/```/g, '')
-        matchedSpecialisations = JSON.parse(jsonStr)
+        const match = contentStr.match(/\[[\s\S]*?\]/)
+        if (match) {
+          matchedSpecialisations = JSON.parse(match[0])
+        } else {
+          matchedSpecialisations = ['Paediatric', 'General']
+        }
     } catch(err) {
-        throw new Error('Groq failed to return a valid JSON array string')
+        matchedSpecialisations = ['Paediatric', 'General']
     }
     
     if (!Array.isArray(matchedSpecialisations) || matchedSpecialisations.length === 0) {
