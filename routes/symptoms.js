@@ -150,56 +150,84 @@ router.post('/analyze', protect, async (req, res) => {
     if (!lng || !lat) {
       return res.status(400).json({ message: 'Location is required' })
     }
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ message: 'Groq API Key is not configured on the server' })
-    }
+    let matchedSpecialisations = []
 
-    const systemPrompt = `You are an AI pediatric triage router for the KidSure app.
+    // 1. Try Groq LPU if configured
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const systemPrompt = `You are an AI pediatric triage router for the KidSure app.
 Read the parent's input carefully. Map their input to AT LEAST ONE and AT MOST THREE of the following exact categories: 
 ["Paediatric", "General", "Emergency", "Surgery", "ENT", "Dermatology", "Orthopaedic", "Neurology"].
 Return ONLY a valid JSON array of strings containing your selected categories.
 Never return markdown, conversational text, or medical advice.`
 
-    // Perform native Node.js fetch to Groq LPU
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: text }
-        ],
-        temperature: 0.1,
-      })
-    })
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: text },
+            ],
+            temperature: 0.1,
+          }),
+        })
 
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error('Groq API Error Details:', errText);
-        throw new Error(`Failed to communicate with Groq LPU API: ${errText}`);
-    }
-
-    const data = await response.json()
-    const contentStr = data.choices?.[0]?.message?.content?.trim() || ''
-    
-    let matchedSpecialisations = []
-    try {
-        const match = contentStr.match(/\[[\s\S]*?\]/)
-        if (match) {
-          matchedSpecialisations = JSON.parse(match[0])
+        if (response.ok) {
+          const data = await response.json()
+          const contentStr = data.choices?.[0]?.message?.content?.trim() || ''
+          const match = contentStr.match(/\[[\s\S]*?\]/)
+          if (match) {
+            matchedSpecialisations = JSON.parse(match[0])
+          }
         } else {
-          matchedSpecialisations = ['Paediatric', 'General']
+          console.warn('Groq API returned error status, using built-in clinical NLP fallback')
         }
-    } catch(err) {
-        matchedSpecialisations = ['Paediatric', 'General']
+      } catch (groqErr) {
+        console.warn('Groq API call failed, using built-in clinical NLP fallback:', groqErr.message)
+      }
     }
-    
+
+    // 2. Resilient Medical NLP Keyword Fallback (runs if Groq fails or returns empty)
     if (!Array.isArray(matchedSpecialisations) || matchedSpecialisations.length === 0) {
-        return res.status(404).json({ message: 'AI could not map your issue to a specific category.' })
+      const lower = text.toLowerCase()
+      const matched = new Set()
+
+      if (/fever|temperature|shiver|cold|flu|cough|runny|vomit|diarrhea|infant|baby|child|pediatric|paediatric/.test(lower)) {
+        matched.add('Paediatric')
+        matched.add('General')
+      }
+      if (/emergency|severe|unconscious|bleed|breath|burn|seizure|chok|accident|critical|danger|poison/.test(lower)) {
+        matched.add('Emergency')
+        matched.add('Paediatric')
+      }
+      if (/bone|fracture|joint|limb|fall|sprain|twist|arm|leg|ankle|knee/.test(lower)) {
+        matched.add('Orthopaedic')
+      }
+      if (/ear|nose|throat|tonsil|hearing|eye|redness|discharge|cough/.test(lower)) {
+        matched.add('ENT')
+      }
+      if (/skin|rash|itch|spots|allergy|blister|eczema|bite|hive/.test(lower)) {
+        matched.add('Dermatology')
+      }
+      if (/headache|dizzy|seizure|faint|vision|numb|brain|neurology/.test(lower)) {
+        matched.add('Neurology')
+      }
+      if (/surgery|wound|cut|appendix|stomach|abdomen|belly|swallow/.test(lower)) {
+        matched.add('Surgery')
+        matched.add('Paediatric')
+      }
+
+      if (matched.size === 0) {
+        matched.add('Paediatric')
+        matched.add('General')
+      }
+
+      matchedSpecialisations = Array.from(matched).slice(0, 3)
     }
 
     // Now query MongoDB for hospitals that match those exact strictly spelled categories
