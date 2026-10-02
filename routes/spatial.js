@@ -18,7 +18,7 @@ router.get('/boundaries', protect, async (req, res) => {
 })
 
 // 2. GET /api/spatial/within-boundary
-// Feature 4: Containment query using $geoWithin to find hospitals inside a polygon
+// Feature: Containment query using $geoWithin to find hospitals inside a polygon
 router.get('/within-boundary', protect, async (req, res) => {
   try {
     const { district = 'Coimbatore' } = req.query
@@ -36,12 +36,13 @@ router.get('/within-boundary', protect, async (req, res) => {
     }
 
     const hospitals = await Hospital.find({
+      status: 'approved',
       location: {
         $geoWithin: {
           $geometry: boundaryDoc.boundary,
         },
       },
-    }).select('name address district phone categories location avgRating is24x7 isEmergency')
+    }).select('name address district phone categories location avgRating ratingCount is24x7 isEmergency operatingHours coverImage')
 
     return res.status(200).json({
       district: boundaryDoc.district,
@@ -53,6 +54,88 @@ router.get('/within-boundary', protect, async (req, res) => {
   } catch (err) {
     console.error('Error in $geoWithin query:', err)
     return res.status(500).json({ message: 'Server error executing $geoWithin query' })
+  }
+})
+
+// 2b. GET /api/spatial/smart-nearby
+// Production Proximity: Dynamic 10km search with automatic fallback expansion to 50km
+router.get('/smart-nearby', protect, async (req, res) => {
+  try {
+    const { lng, lat, initialRadius = 10000, maxRadius = 50000, limit = 50 } = req.query
+
+    if (!lng || !lat) {
+      return res.status(400).json({ message: 'lng and lat coordinates are required' })
+    }
+
+    const parsedLng = parseFloat(lng)
+    const parsedLat = parseFloat(lat)
+    const initRad = parseFloat(initialRadius)
+    const maxRad = parseFloat(maxRadius)
+    const parsedLimit = parseInt(limit)
+
+    const runGeoNear = async (radiusMeters) => {
+      return await Hospital.aggregate([
+        {
+          $geoNear: {
+            near: {
+              type: 'Point',
+              coordinates: [parsedLng, parsedLat],
+            },
+            distanceField: 'distanceMeters',
+            spherical: true,
+            maxDistance: radiusMeters,
+            query: { status: 'approved' },
+          },
+        },
+        {
+          $project: {
+            name: 1,
+            address: 1,
+            district: 1,
+            phone: 1,
+            categories: 1,
+            location: 1,
+            avgRating: 1,
+            ratingCount: 1,
+            is24x7: 1,
+            isEmergency: 1,
+            operatingHours: 1,
+            coverImage: 1,
+            distanceMeters: { $round: ['$distanceMeters', 0] },
+            distanceKm: { $round: [{ $divide: ['$distanceMeters', 1000] }, 2] },
+          },
+        },
+        { $limit: parsedLimit },
+      ])
+    }
+
+    // Step 1: Initial proximity query (10km default)
+    let hospitals = await runGeoNear(initRad)
+    let autoExpanded = false
+    let radiusUsedKm = initRad / 1000
+
+    // Step 2: Auto-expansion if no hospitals found
+    if (hospitals.length === 0 && maxRad > initRad) {
+      hospitals = await runGeoNear(maxRad)
+      if (hospitals.length > 0) {
+        autoExpanded = true
+        radiusUsedKm = maxRad / 1000
+      }
+    }
+
+    return res.status(200).json({
+      userLocation: { lng: parsedLng, lat: parsedLat },
+      count: hospitals.length,
+      radiusUsedKm,
+      autoExpanded,
+      message: autoExpanded
+        ? `No hospitals found within ${initRad / 1000} km. Search auto-expanded to ${radiusUsedKm} km.`
+        : `Showing hospitals within ${radiusUsedKm} km.`,
+      hospitals,
+    })
+  } catch (err) {
+    console.error('Error in smart nearby query:', err)
+    return res.status(500).json({ message: 'Server error in smart nearby query' })
   }
 })
 
