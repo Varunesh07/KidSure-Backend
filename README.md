@@ -1,65 +1,90 @@
 # KidSure — Backend API
 
-A location-aware paediatric hospital finder. Parents travelling to an unfamiliar city can enter their child's symptoms and instantly find the nearest, most relevant hospitals — with real-time open/closed status, star ratings, and map support.
+A high-performance, location-aware paediatric healthcare discovery platform. Built with the **MERN** stack, KidSure empowers parents and guardians to instantly locate the most appropriate pediatric facilities for their child's specific medical conditions — featuring real-time geospatial search, AI clinical triage, interactive district boundary analytics, and multi-role hospital management.
 
-Built with the MERN stack. This repository contains the Express + MongoDB backend only.
-
-
+> **Latest Update**: Recently merged with `feature/hospital-discovery`, expanding the platform from city-level search into a full state-wide geospatial intelligence system covering all 38 districts of Tamil Nadu with 1,021 facilities, district boundary polygons, resilient hybrid AI triage, and adaptive 50 km proximity fallback.
 
 ---
 
-## Features
+## Key Features
 
-- JWT-based authentication with role system (`user`, `hospital_admin`, `superadmin`)
-- Google OAuth 2.0 integration for seamless one-tap login and registration
-- Geospatial hospital search using MongoDB `$near` and `2dsphere` index
-- AI-Powered Symptom Checking — uses Groq LPU (Llama 3) to parse natural language descriptions into specialisation categories
-- Symptom-to-specialisation matching algorithm — returns top 5 hospitals scored by relevance + proximity
-- Hospital submission and approval workflow — hospital admins submit, superadmin approves
-- Star ratings with automatic average recalculation
-- Save/unsave hospitals per user
-- Cloudinary image upload for hospital cover photos
-- Fully seeded with 20 real Coimbatore hospitals and 27 categorised symptoms
+### 🌟 Recently Integrated (`feature/hospital-discovery`)
+- **State-Wide Pediatric Healthcare Dataset**:
+  - Expanded coverage to **1,021 validated healthcare facilities** across all **38 districts of Tamil Nadu** (PHCs, CHCs, Sub-District Hospitals, District HQs, Government Medical Colleges, and private tertiary pediatric centers).
+  - Rich facility metadata: pediatric bed capacity, NICU/PICU availability, 24/7 emergency readiness, ventilator support, and pediatric surgery units.
+- **Geospatial Boundary Intelligence (38 Districts)**:
+  - Full GeoJSON MultiPolygon boundary support stored with MongoDB `2dsphere` spatial indexing.
+  - Spatial containment queries (`$geoWithin`) and district-level hospital aggregations.
+- **Adaptive Proximity Fallback Engine (10 km ➔ 50 km)**:
+  - Automatically expands the query radius from 10 km to 50 km when local pediatric facilities are sparse, ensuring parents in rural and semi-urban areas always find emergency care.
+- **Resilient Hybrid Clinical NLP & AI Triage**:
+  - Powered by Groq LLM (`openai/gpt-oss-20b`) with a 3-second timeout circuit breaker.
+  - **Offline Clinical NLP Fallback**: Guaranteed zero-downtime triage through an internal clinical keyword rule engine that classifies pediatric conditions (respiratory distress, neonatal fever, trauma, dehydration, seizures) even when API limits or external networks fail.
+
+### 🛡️ Core & Existing Features
+- **JWT Authentication & RBAC**:
+  - Secure role-based access control with three privilege tiers: `user`, `hospital_admin`, and `superadmin`.
+- **Google OAuth 2.0 Integration**:
+  - Seamless one-tap authentication verified against Google APIs.
+- **Geospatial Proximity Queries**:
+  - Spherical distance calculations (`$nearSphere`) with accurate kilometer distance computation.
+- **Symptom-to-Specialisation Matching Engine**:
+  - Clinical symptom matching algorithm scoring facilities by medical relevance and distance.
+- **Hospital Lifecycle & Approval Workflow**:
+  - Hospital administrators can submit listings and update details; superadmins review, approve, or reject submissions with feedback.
+- **Star Ratings & Reviews**:
+  - Compound indexed user rating system with atomic running average recalculation.
+- **Saved Hospitals**:
+  - Bookmarking system allowing users to save and quickly access preferred facilities.
+- **Cloudinary Media Storage**:
+  - Automated image optimization and storage for hospital photographs.
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js |
-| Framework | Express.js |
-| Database | MongoDB Atlas |
-| ODM | Mongoose |
-| Auth | JSON Web Tokens (JWT) + bcryptjs |
-| Image Storage | Cloudinary |
-| File Upload | Multer + multer-storage-cloudinary |
+|---|---|
+| **Runtime** | Node.js (ES Modules) |
+| **Framework** | Express.js |
+| **Database** | MongoDB Atlas (with `2dsphere` spatial indexing) |
+| **ODM** | Mongoose |
+| **Authentication** | JSON Web Tokens (JWT) + bcryptjs + Google Auth Library |
+| **AI / NLP** | Groq SDK (`openai/gpt-oss-20b`) + Rule-Based Clinical NLP |
+| **Spatial / GIS** | GeoJSON + Turf.js / MongoDB Spatial Operators |
+| **Media Storage** | Cloudinary + Multer Storage Cloudinary |
 
 ---
 
 ## Project Structure
 
-```
+```text
 server/
-├── models/
-│   ├── Hospital.js         # GeoJSON location, categories, operating hours
-│   ├── User.js             # Roles, saved hospitals, managed hospital
-│   ├── Symptom.js          # Symptom categories with specialisation weights
-│   └── Rating.js           # Star ratings with compound unique index
-├── routes/
-│   ├── auth.js             # Register, login, /me
-│   ├── hospitals.js        # Nearby, search, detail, submit, edit
-│   ├── symptoms.js         # Get all symptoms, symptom match algorithm
-│   ├── ratings.js          # Submit rating, check user rating
-│   ├── user.js             # Saved hospitals toggle
-│   └── admin.js            # Approve, reject, delete, promote users
+├── data/
+│   ├── all_district_boundaries.json  # 38 Tamil Nadu district boundary GeoJSONs
+│   └── districtBoundaries.json       # Core district boundary definitions
 ├── middleware/
-│   ├── authMiddleware.js   # protect, hospitalAdminOnly, superAdminOnly
-│   └── upload.js           # Cloudinary multer config
-├── seed.js                 # One-time hospital seed script
-├── .env                    # Environment variables (not committed)
-├── .gitignore
-└── index.js                # Express app entry point
+│   ├── authMiddleware.js             # protect, hospitalAdminOnly, superAdminOnly
+│   └── upload.js                     # Cloudinary multer upload configuration
+├── models/
+│   ├── Boundary.js                   # 2dsphere GeoJSON boundary polygons
+│   ├── Hospital.js                   # Hospital schema with 2dsphere Point coordinates
+│   ├── Rating.js                     # Star ratings with unique compound index
+│   ├── Symptom.js                    # Categorized clinical symptoms & specialization weights
+│   └── User.js                       # User authentication, roles, and saved hospitals
+├── routes/
+│   ├── admin.js                      # Hospital approval/rejection & user role promotion
+│   ├── auth.js                       # Register, login, Google OAuth, and /me
+│   ├── hospitals.js                  # Proximity search, 50km fallback, details, submit
+│   ├── ratings.js                    # Star rating submissions and queries
+│   ├── spatial.js                    # District boundary queries and spatial containment
+│   ├── symptoms.js                   # Groq LLM + offline clinical NLP triage & matching
+│   └── user.js                       # Saved hospital toggles and user profile
+├── importHospitals.js                # Dataset transformation & import pipeline (1,021 facilities)
+├── seedBoundaries.js                 # District boundary polygon seeder
+├── seedSymptoms.js                   # Clinical symptom taxonomy seeder
+├── index.js                          # Express application entry point & CORS
+└── .env                              # Environment configuration
 ```
 
 ---
@@ -67,149 +92,126 @@ server/
 ## Getting Started
 
 ### Prerequisites
-
-- Node.js v18 or above
-- A free [MongoDB Atlas](https://cloud.mongodb.com) account
-- A free [Cloudinary](https://cloudinary.com) account
+- Node.js v18.x or above
+- A MongoDB Atlas cluster (with support for `2dsphere` indexes)
+- A Cloudinary account (for image uploads)
+- A Groq API key (optional — offline clinical triage operates independently)
 
 ### Installation
 
-**1. Clone the repository**
-```bash
-git clone https://github.com/Varunesh07/KidSure-Backend.git
-cd KidSure-Backend
-```
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Varunesh07/KidSure-Backend.git
+   cd KidSure-Backend
+   ```
 
-**2. Install dependencies**
-```bash
-npm install
-```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-**3. Create a `.env` file** in the root of the project:
-```env
-MONGO_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/pediatric-app
-JWT_SECRET=your_long_random_secret_key
-PORT=5000
-CLIENT_URL=http://localhost:5173
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-GOOGLE_CLIENT_ID=your_google_oauth_client_id
-GROQ_API_KEY=your_groq_api_key
-```
+3. **Configure Environment Variables (`.env`):**
+   Create a `.env` file in the root directory:
+   ```env
+   # MongoDB Atlas Connection URI
+   MONGO_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?appName=Cluster0
 
-> Get `MONGO_URI` from Atlas → Clusters → Connect → Drivers.  
-> Get Cloudinary credentials from your Cloudinary dashboard.
+   # Server Port & Secret
+   PORT=5000
+   JWT_SECRET=your_long_random_secret_token_here
 
-**4. Add `"type": "module"` to `package.json`**
-```json
-{
-  "type": "module",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "seed": "node seed.js"
-  }
-}
-```
+   # Client Origin
+   CLIENT_URL=http://localhost:5173
 
-**5. Start the development server**
-```bash
-npm run dev
-```
+   # Groq Cloud API Key
+   GROQ_API_KEY=gsk_your_groq_api_key_here
 
-You should see:
-```
-Connected to MongoDB Atlas
-Server running on port 5000
-```
+   # Google OAuth Client ID
+   GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+
+   # Cloudinary Media Storage
+   CLOUDINARY_CLOUD_NAME=your_cloud_name
+   CLOUDINARY_API_KEY=your_cloudinary_key
+   CLOUDINARY_API_SECRET=your_cloudinary_secret
+   ```
+
+4. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+
+   Expected output:
+   ```text
+   Connected to MongoDB Atlas
+   Server running on port 5000
+   ```
 
 ---
 
-## Seeding Data
+## Data Pipelines & Seeding
 
-After the server connects successfully, run the seed script once to populate 20 Coimbatore hospitals:
+The platform includes automated scripts to seed facilities, district boundaries, and clinical symptoms:
 
-```bash
-npm run seed
-```
-
-To seed symptoms, first register an account, manually set its role to `superadmin` in Atlas, then call:
-
-```
-POST http://localhost:5000/api/symptoms/seed
-Authorization: Bearer <superadmin_token>
-```
-
----
-
-## Setting Up Superadmin
-
-The `superadmin` role cannot be assigned through the API for security reasons. To create one:
-
-1. Register a normal account via `POST /api/auth/register`
-2. Go to MongoDB Atlas → Collections → users
-3. Find your document → change `role` field to `"superadmin"` → save
-
-You only need one superadmin account. All admin routes are protected and only accessible with this role.
+- **1,021 Healthcare Facilities**:
+  ```bash
+  node importHospitals.js
+  ```
+- **38 District Polygon Boundaries**:
+  ```bash
+  node seedBoundaries.js
+  ```
+- **Clinical Symptoms & Urgency Weights**:
+  ```bash
+  node seedSymptoms.js
+  ```
 
 ---
 
-## Environment Variables
+## API Reference
 
-| Variable | Description |
-|----------|-------------|
-| `MONGO_URI` | MongoDB Atlas connection string |
-| `JWT_SECRET` | Secret key for signing JWT tokens — make it long and random |
-| `PORT` | Port for Express server (default: 5000) |
-| `CLIENT_URL` | Frontend URL for CORS — use `http://localhost:5173` locally |
-| `CLOUDINARY_CLOUD_NAME` | From Cloudinary dashboard |
-| `CLOUDINARY_API_KEY` | From Cloudinary dashboard |
-| `CLOUDINARY_API_SECRET` | From Cloudinary dashboard — never expose this |
-| `GOOGLE_CLIENT_ID` | From Google Cloud Console (OAuth 2.0 Client IDs), used for Google Sign-In backend verification |
-| `GROQ_API_KEY` | Your Groq API key used for the AI symptom analyzer |
+### Geospatial & Hospital Routes (`/api/hospitals`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| `GET` | `/nearby?lat=&lng=&radius=` | Proximity search with automatic 10km ➔ 50km fallback | Public |
+| `GET` | `/search?q=&category=&district=` | Full-text and district/category search | Public |
+| `GET` | `/:id` | Full hospital details & pediatric capabilities | Public |
+| `POST` | `/submit` | Submit a new hospital listing | Hospital Admin |
+| `PUT` | `/:id/edit` | Update hospital details | Hospital Admin |
 
----
+### Spatial & Boundary Intelligence (`/api/spatial`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| `GET` | `/boundaries` | All 38 district GeoJSON polygon boundaries | Public |
+| `GET` | `/boundaries/:district` | Specific district GeoJSON polygon | Public |
+| `GET` | `/containment?lat=&lng=` | Detects district from coordinates via `$geoWithin` | Public |
 
-## API Overview
+### Symptom Triage & AI Routing (`/api/symptoms`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| `GET` | `/` | Retrieve all 27 clinical symptoms grouped by system | Public |
+| `POST` | `/match` | Rank hospitals matching selected symptoms + coordinates | Public |
+| `POST` | `/analyze` | Hybrid Groq LLM + offline clinical NLP triage | Public |
 
-Full API documentation with request/response examples is in [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md).
+### Authentication (`/api/auth`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| `POST` | `/register` | Create a new user account | Public |
+| `POST` | `/login` | Authenticate with email/password and obtain JWT | Public |
+| `POST` | `/google` | Google OAuth 2.0 one-tap authentication | Public |
+| `GET` | `/me` | Get current authenticated user profile | User |
 
-### Quick reference
-
-| Method | Route | Description | Auth |
-|--------|-------|-------------|------|
-| POST | `/api/auth/register` | Create account | Public |
-| POST | `/api/auth/login` | Login, get token | Public |
-| POST | `/api/auth/google` | Google OAuth one-tap Sign-In/Register | Public |
-| GET | `/api/auth/me` | Get current user | User |
-| GET | `/api/hospitals/nearby` | Hospitals near location | User |
-| GET | `/api/hospitals/search` | Filter by category + distance | User |
-| GET | `/api/hospitals/:id` | Hospital detail | User |
-| POST | `/api/hospitals/submit` | Submit new hospital | Hospital admin |
-| PUT | `/api/hospitals/:id/edit` | Edit own listing | Hospital admin |
-| POST | `/api/symptoms/match` | Top 5 hospitals for symptoms | User |
-| POST | `/api/symptoms/analyze` | AI analysis of natural language symptoms using Groq | User |
-| GET | `/api/symptoms` | All symptoms grouped | User |
-| POST | `/api/ratings/:hospitalId` | Submit star rating | User |
-| GET | `/api/ratings/:hospitalId/mine` | Check own rating | User |
-| POST | `/api/user/saved/:hospitalId` | Toggle save hospital | User |
-| GET | `/api/user/saved` | Get saved hospitals | User |
-| GET | `/api/admin/pending` | View pending hospitals | Superadmin |
-| PUT | `/api/admin/approve/:id` | Approve hospital | Superadmin |
-| PUT | `/api/admin/reject/:id` | Reject with reason | Superadmin |
-| DELETE | `/api/admin/delete/:id` | Delete hospital | Superadmin |
-| GET | `/api/admin/users` | View all users | Superadmin |
+### Administration (`/api/admin`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| `GET` | `/pending` | List submitted hospitals awaiting approval | Superadmin |
+| `PUT` | `/approve/:id` | Approve hospital listing for public discovery | Superadmin |
+| `PUT` | `/reject/:id` | Reject submission with explanation | Superadmin |
+| `GET` | `/users` | List all users and managed hospitals | Superadmin |
+| `PUT` | `/promote/:id` | Update user access role | Superadmin |
 
 ---
 
-## Roles and Permissions
+## Deployment Configuration
 
-| Role | Can do |
-|------|--------|
-| `user` | Search hospitals, view details, rate, save |
-| `hospital_admin` | All user permissions + submit and edit own hospital listing |
-| `superadmin` | All permissions + approve/reject listings, manage users |
-
----
-
+- **Render / Production Hosting**: Ensure `MONGO_URI` points to the active Atlas cluster containing the `2dsphere` indexes.
+- **CORS Handling**: Configured with dynamic origin resolution (`origin: true`, `credentials: true`) to support web, mobile, and custom domains without cross-origin friction.
