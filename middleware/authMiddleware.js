@@ -13,17 +13,28 @@ const protect = async (req, res, next) => {
       // extract token from "Bearer <token>"
       token = req.headers.authorization.split(' ')[1]
 
-      // verify token and decode the payload
-      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      // verify access token using ACCESS_TOKEN_SECRET (falling back to JWT_SECRET if unset)
+      const secret = process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET
+      const decoded = jwt.verify(token, secret)
 
       // attach the user to the request object (minus the password)
       req.user = await User.findById(decoded.id).select('-password')
+      if (!req.user) {
+        return res.status(401).json({ message: 'User no longer exists' })
+      }
 
-      next()
+      return next()
     } catch (err) {
+      // Explicitly distinguish expired access token so frontend can trigger silent refresh
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          code: 'TOKEN_EXPIRED',
+          message: 'Access token expired',
+        })
+      }
       return res
         .status(401)
-        .json({ message: 'Token invalid or expired, please login again' })
+        .json({ message: 'Token invalid, please login again' })
     }
   }
 
