@@ -2,6 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import mongoose from 'mongoose'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 
 // routes (we'll create these next)
 import authRoutes from './routes/auth.js'
@@ -21,6 +22,7 @@ app.use(
     credentials: true,
   }),
 )
+app.use(cookieParser())
 app.use(express.json()) // lets Express read req.body as JSON
 
 // routes

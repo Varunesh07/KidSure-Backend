@@ -47,6 +47,16 @@ const userSchema = new mongoose.Schema(
         ref: 'Hospital',
       },
     ],
+
+    // Stores hashed active refresh tokens for rotation & revocation
+    refreshTokens: [
+      {
+        tokenHash: { type: String, required: true },
+        familyId: { type: String, default: null },
+        createdAt: { type: Date, default: Date.now },
+        expiresAt: { type: Date, required: true },
+      },
+    ],
   },
   { timestamps: true },
 )

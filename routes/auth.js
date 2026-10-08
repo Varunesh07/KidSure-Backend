@@ -3,14 +3,31 @@ import jwt from 'jsonwebtoken'
 import { OAuth2Client } from 'google-auth-library'
 import User from '../models/User.js'
 import { protect } from '../middleware/authMiddleware.js'
+import {
+  generateTokens,
+  generateAccessToken,
+  getRefreshTokenCookieOptions,
+  hashToken,
+} from '../utils/tokens.js'
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
-
 const router = express.Router()
 
-// helper — generates a JWT token from a user id
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' })
+// Helper to save a new refresh token hash to user record (and prune expired ones)
+const attachRefreshTokenToUser = async (user, tokenData) => {
+  // Prune any expired tokens
+  user.refreshTokens = (user.refreshTokens || []).filter(
+    (rt) => rt.expiresAt && rt.expiresAt > new Date()
+  )
+
+  user.refreshTokens.push({
+    tokenHash: tokenData.tokenHash,
+    familyId: tokenData.familyId,
+    createdAt: new Date(),
+    expiresAt: tokenData.expiresAt,
+  })
+
+  await user.save()
 }
 
 // POST /api/auth/register
@@ -34,7 +51,7 @@ router.post('/register', async (req, res) => {
     }
 
     // only allow user or hospital_admin on register
-    // superadmin can never be created via the API — you set it manually in Atlas
+    // superadmin can never be created via the API — set manually in Atlas
     const allowedRoles = ['user', 'hospital_admin']
     const assignedRole = allowedRoles.includes(role) ? role : 'user'
 
@@ -46,15 +63,27 @@ router.post('/register', async (req, res) => {
       role: assignedRole,
     })
 
+    // Generate token pair (short-lived access + long-lived refresh)
+    const tokens = generateTokens(user)
+    await attachRefreshTokenToUser(user, tokens)
+
+    // Set HttpOnly refresh cookie
+    res.cookie(
+      'refreshToken',
+      tokens.refreshToken,
+      getRefreshTokenCookieOptions()
+    )
+
     return res.status(201).json({
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
-      token: generateToken(user._id),
+      accessToken: tokens.accessToken,
+      token: tokens.accessToken, // backward compatibility
     })
   } catch (err) {
-    console.error(err)
+    console.error('Registration error:', err)
     return res.status(500).json({ message: 'Server error during registration' })
   }
 })
@@ -76,11 +105,21 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' })
     }
 
-    // matchPassword is the custom method we defined in User.js
     const isMatch = await user.matchPassword(password)
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid email or password' })
     }
+
+    // Generate token pair
+    const tokens = generateTokens(user)
+    await attachRefreshTokenToUser(user, tokens)
+
+    // Set HttpOnly refresh cookie
+    res.cookie(
+      'refreshToken',
+      tokens.refreshToken,
+      getRefreshTokenCookieOptions()
+    )
 
     const freshUser = await User.findById(user._id).select('-password')
 
@@ -91,17 +130,141 @@ router.post('/login', async (req, res) => {
       role: freshUser.role,
       managedHospital: freshUser.managedHospital,
       savedHospitals: freshUser.savedHospitals || [],
-      token: generateToken(freshUser._id),
+      accessToken: tokens.accessToken,
+      token: tokens.accessToken, // backward compatibility
     })
   } catch (err) {
-    console.error(err)
+    console.error('Login error:', err)
     return res.status(500).json({ message: 'Server error during login' })
   }
 })
 
+// POST /api/auth/refresh
+// Receives HttpOnly cookie, verifies JWT signature, validates tokenHash in DB,
+// prunes old token and rotates to issue a new access token and a new refresh token.
+router.post('/refresh', async (req, res) => {
+  try {
+    const incomingRefreshToken = req.cookies?.refreshToken
+
+    if (!incomingRefreshToken) {
+      return res.status(401).json({ message: 'Refresh token cookie missing' })
+    }
+
+    let decoded
+    try {
+      decoded = jwt.verify(
+        incomingRefreshToken,
+        process.env.REFRESH_TOKEN_SECRET
+      )
+    } catch (jwtErr) {
+      res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+      return res.status(401).json({ message: 'Invalid or expired refresh token' })
+    }
+
+    const user = await User.findById(decoded.id)
+    if (!user) {
+      res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+      return res.status(401).json({ message: 'User not found' })
+    }
+
+    const incomingHash = hashToken(incomingRefreshToken)
+    const tokenIndex = (user.refreshTokens || []).findIndex(
+      (rt) => rt.tokenHash === incomingHash
+    )
+
+    // Token Reuse Detection:
+    // The JWT is cryptographically valid for this user, but its hash was already removed from the DB!
+    // This happens if a revoked or already rotated token is presented again.
+    if (tokenIndex === -1) {
+      console.warn(
+        `[SECURITY WARNING] Refresh token reuse detected for user ${user._id}. Invalidating family.`
+      )
+      if (decoded.familyId) {
+        user.refreshTokens = user.refreshTokens.filter(
+          (rt) => rt.familyId !== decoded.familyId
+        )
+      } else {
+        user.refreshTokens = []
+      }
+      await user.save()
+      res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+      return res.status(401).json({
+        message: 'Refresh token reuse detected. Please log in again.',
+      })
+    }
+
+    // Check expiration against stored database record
+    const storedToken = user.refreshTokens[tokenIndex]
+    if (storedToken.expiresAt && storedToken.expiresAt < new Date()) {
+      user.refreshTokens.splice(tokenIndex, 1)
+      await user.save()
+      res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+      return res.status(401).json({ message: 'Refresh token has expired' })
+    }
+
+    // ROTATION: Invalidate the old refresh token
+    user.refreshTokens.splice(tokenIndex, 1)
+
+    // Generate new token pair preserving the token family
+    const newTokens = generateTokens(user, decoded.familyId)
+
+    // Prune any expired entries and store new hash
+    user.refreshTokens = user.refreshTokens.filter(
+      (rt) => rt.expiresAt && rt.expiresAt > new Date()
+    )
+    user.refreshTokens.push({
+      tokenHash: newTokens.tokenHash,
+      familyId: newTokens.familyId,
+      createdAt: new Date(),
+      expiresAt: newTokens.expiresAt,
+    })
+    await user.save()
+
+    // Send new HttpOnly refresh cookie
+    res.cookie(
+      'refreshToken',
+      newTokens.refreshToken,
+      getRefreshTokenCookieOptions()
+    )
+
+    return res.status(200).json({
+      accessToken: newTokens.accessToken,
+      token: newTokens.accessToken, // backward compatibility
+    })
+  } catch (err) {
+    console.error('Refresh token error:', err)
+    return res.status(500).json({ message: 'Server error processing token refresh' })
+  }
+})
+
+// POST /api/auth/logout
+// Revokes the refresh token from the database and clears the HttpOnly cookie.
+router.post('/logout', async (req, res) => {
+  try {
+    const incomingRefreshToken = req.cookies?.refreshToken
+
+    if (incomingRefreshToken) {
+      try {
+        const incomingHash = hashToken(incomingRefreshToken)
+        await User.updateOne(
+          { 'refreshTokens.tokenHash': incomingHash },
+          { $pull: { refreshTokens: { tokenHash: incomingHash } } }
+        )
+      } catch (err) {
+        console.error('Error during logout token revocation:', err)
+      }
+    }
+
+    res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+    return res.status(200).json({ message: 'Logged out successfully' })
+  } catch (err) {
+    console.error('Logout error:', err)
+    return res.status(500).json({ message: 'Server error during logout' })
+  }
+})
+
 // GET /api/auth/me
-// returns the logged in user's profile — React uses this on app load
-// to check if the stored token is still valid
+// Returns the logged-in user profile
 router.get('/me', protect, async (req, res) => {
   try {
     const freshUser = await User.findById(req.user._id).select('-password')
@@ -113,17 +276,16 @@ router.get('/me', protect, async (req, res) => {
       role: freshUser.role,
       managedHospital: freshUser.managedHospital,
       savedHospitals: freshUser.savedHospitals || [],
-      token: generateToken(freshUser._id),
+      accessToken: generateAccessToken(freshUser),
+      token: generateAccessToken(freshUser),
     })
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
+    console.error('Auth/me error:', err)
+    return res.status(500).json({ message: 'Server error fetching user profile' })
   }
 })
 
 // POST /api/auth/google
-// Verifies the Google ID token from the frontend popup
-// Finds or creates the user and returns the same JWT format as login
 router.post('/google', async (req, res) => {
   try {
     const { access_token } = req.body
@@ -133,31 +295,45 @@ router.post('/google', async (req, res) => {
     }
 
     // Fetch the user's profile from Google using the access token
-    const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${access_token}` }
-    })
+    const googleRes = await fetch(
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+      }
+    )
 
     if (!googleRes.ok) {
-      return res.status(401).json({ message: 'Invalid Google token. Please try again.' })
+      return res
+        .status(401)
+        .json({ message: 'Invalid Google token. Please try again.' })
     }
 
-    const { email, name, picture } = await googleRes.json()
+    const { email, name } = await googleRes.json()
 
     // Check if a user with this Google email already exists
     let user = await User.findOne({ email })
 
     if (!user) {
-      // First time — auto-register as a regular user (no password needed for Google accounts)
       user = await User.create({
         name,
         email,
-        password: `google_oauth_${Date.now()}`, // placeholder — hashed but never used
+        password: `google_oauth_${Date.now()}`,
         role: 'user',
         phone: '',
       })
     }
 
-    // Return identical JWT format as normal login
+    // Generate token pair
+    const tokens = generateTokens(user)
+    await attachRefreshTokenToUser(user, tokens)
+
+    // Set HttpOnly refresh cookie
+    res.cookie(
+      'refreshToken',
+      tokens.refreshToken,
+      getRefreshTokenCookieOptions()
+    )
+
     const freshUser = await User.findById(user._id).select('-password')
     return res.status(200).json({
       _id: freshUser._id,
@@ -166,11 +342,14 @@ router.post('/google', async (req, res) => {
       role: freshUser.role,
       managedHospital: freshUser.managedHospital,
       savedHospitals: freshUser.savedHospitals || [],
-      token: generateToken(freshUser._id),
+      accessToken: tokens.accessToken,
+      token: tokens.accessToken, // backward compatibility
     })
   } catch (err) {
     console.error('Google Auth Error:', err)
-    return res.status(401).json({ message: 'Google sign-in failed. Please try again.' })
+    return res
+      .status(401)
+      .json({ message: 'Google sign-in failed. Please try again.' })
   }
 })
 
